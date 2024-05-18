@@ -28,13 +28,8 @@ async def crawl() -> None:
             try:
                 ts = time.time()
 
-                log.debug("New request to %s", RATES_URL)
-                async with session.get(RATES_URL) as resp:
-                    resp.raise_for_status()
-                    raw_data = await resp.read()
-
+                raw_data = await make_request(session, RATES_URL)
                 assets = await get_available_assets()
-
                 points = parse_raw(raw_data, int(ts), assets)
 
                 if points:
@@ -45,10 +40,20 @@ async def crawl() -> None:
             except ClientError:
                 log.exception("Error in request %s:", RATES_URL)
 
+            except asyncio.CancelledError:
+                break
+
             except Exception:
                 log.exception("Unexpected exception:")
 
     log.info("Finish ratecrawler task")
+
+
+async def make_request(session: ClientSession, url: str) -> bytes:
+    log.debug("New request to %s", RATES_URL)
+    async with session.get(RATES_URL) as resp:
+        resp.raise_for_status()
+        return await resp.read()
 
 
 def parse_raw(raw: bytes, ts: int, assets: list[Asset]) -> list[Point]:

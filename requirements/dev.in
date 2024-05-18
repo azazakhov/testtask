@@ -1,4 +1,7 @@
 -c main.txt
 
 mypy
+pytest
+pytest-aiohttp
+pytest-asyncio
 ruff

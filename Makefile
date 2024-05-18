@@ -47,3 +47,8 @@ lint:
 .PHONY: run
 run:
 	python -m aiohttp.web assetsrates.app:create_app
+
+
+.PHONY: test
+test:
+	pytest
