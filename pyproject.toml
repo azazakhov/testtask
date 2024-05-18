@@ -1,0 +1,49 @@
+[project]
+dynamic = ["version", "dependencies"]
+name = "assetsrates"
+requires-python = "~=3.12.0"
+
+
+[tool.setuptools]
+packages = ["assetsrates"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = "requirements/main.in"}
+version = {attr = "assetsrates.__version__"}
+
+[tool.setuptools.package-data]
+assetsrates = ["py.typed"]
+
+
+[tool.pip-tools]
+generate-hashes = true
+strip-extras = true
+
+
+[tool.mypy]
+disallow_untyped_defs = true
+files = "assetsrates/"
+strict = true
+warn_unused_configs = true
+
+
+[tool.ruff]
+line-length = 79
+
+[tool.ruff.lint]
+# https://docs.astral.sh/ruff/rules/
+extend-select = [
+    "C90",  # complexity
+    "I",    # isort
+    "N",    # pep8-naming
+    "T10",  # pdb/ipdb found
+    "T20",  # print/pprint found
+    "UP",   # pyupgrade
+]
+
+[tool.ruff.lint.isort]
+case-sensitive = true
+lines-after-imports = 2
+
+[tool.ruff.lint.mccabe]
+max-complexity = 7
