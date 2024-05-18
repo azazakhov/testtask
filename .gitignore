@@ -1,0 +1,24 @@
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# python build artifacts
+build/
+*.egg-info/
+
+# pyenv
+.python-version
+
+# environments
+*.env
+
+# local reqires
+requirements-local.txt
+
+# linters, tests & etc.
+.mypy_cache/
+.ruff_cache/
+
+# MacOS specific
+.DS_Store
