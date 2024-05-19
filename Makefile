@@ -52,3 +52,8 @@ run:
 .PHONY: test
 test:
 	pytest
+
+
+.PHONY: test-dockerignore
+test-dockerignore:
+	rsync --archive --verbose --dry-run . /dev/shm --exclude-from .dockerignore
