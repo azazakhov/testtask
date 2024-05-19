@@ -1,5 +1,13 @@
+"""Provides any storage-related functional.
+
+WARNING:
+    Current implementation uses "dumpb" in-memory storage
+    and does not provide any data persistence.
+"""
+
 import logging
 from collections import defaultdict, deque
+from decimal import Decimal
 from typing import Final, NamedTuple
 
 from .pubsub import publish
@@ -13,17 +21,17 @@ class Asset(NamedTuple):
     name: str
 
 
-class Point(NamedTuple):
+class HistoryPoint(NamedTuple):
+    """Asset's history point."""
+
     asset: Asset
-    # TODO: Ask about "timestamp" type - int or foat?
     timestamp: int
-    # TODO: Ask about "value" type - foat of Decimal?
-    value: float
+    value: Decimal
 
 
 # 30 minutes - new history point is created every second.
 _ASSETS_HISTORY: Final[int] = 30 * 60
-_STORAGE: dict[Asset, deque[Point]] = defaultdict(
+_STORAGE: dict[Asset, deque[HistoryPoint]] = defaultdict(
     lambda: deque(maxlen=_ASSETS_HISTORY)
 )
 
@@ -52,12 +60,12 @@ async def get_asset_by_id(id: int) -> Asset | None:
     return None
 
 
-async def save_points(points: list[Point]) -> None:
+async def save_points(points: list[HistoryPoint]) -> None:
     for point in points:
-        log.debug("New point for %s asset", point.asset.name)
+        log.debug('New history point for "%s" asset', point.asset.name)
         _STORAGE[point.asset].appendleft(point)
         publish(point.asset.name, point)
 
 
-async def get_asset_history(asset: Asset) -> list[Point]:
+async def get_asset_history(asset: Asset) -> list[HistoryPoint]:
     return list(_STORAGE[asset])

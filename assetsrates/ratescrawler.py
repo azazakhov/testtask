@@ -2,12 +2,13 @@ import asyncio
 import logging
 import os
 import time
+from decimal import Decimal
 from typing import Any, Final
 
 from aiohttp import ClientError, ClientSession
 
 from . import json
-from .storage import Asset, Point, get_available_assets, save_points
+from .storage import Asset, HistoryPoint, get_available_assets, save_points
 
 
 log = logging.getLogger(__name__)
@@ -16,6 +17,8 @@ log = logging.getLogger(__name__)
 RATES_URL: Final[str] = os.environ.get("RATES_URL") or ""
 assert RATES_URL, "RATES_URL env var is not set"
 
+REQUEST_PERIOD: Final[int] = 1
+
 
 async def crawl() -> None:
     if not RATES_URL:
@@ -23,48 +26,46 @@ async def crawl() -> None:
         return
 
     log.info("Start ratecrawler task")
-    async with ClientSession() as session:
-        while True:
-            try:
+
+    try:
+        async with ClientSession() as session:
+            while True:
                 ts = time.time()
 
-                raw_data = await make_request(session, RATES_URL)
-                assets = await get_available_assets()
-                points = parse_raw(raw_data, int(ts), assets)
+                try:
+                    log.debug("New request to %s", RATES_URL)
+                    raw_data = await _make_request(session, RATES_URL)
+                    assets = await get_available_assets()
+                    points = parse_raw(raw_data, int(ts), assets)
 
-                if points:
-                    await save_points(points)
+                    if points:
+                        await save_points(points)
 
-                await asyncio.sleep(ts - time.time() + 1)
+                except ClientError:
+                    log.exception("Error in request %s:", RATES_URL)
 
-            except ClientError:
-                log.exception("Error in request %s:", RATES_URL)
+                except Exception:
+                    log.exception("Unexpected exception:")
 
-            except asyncio.CancelledError:
-                break
+                sleep_time = ts - time.time() + REQUEST_PERIOD
+                log.debug("Sleep for %f", sleep_time)
+                await asyncio.sleep(sleep_time)
 
-            except Exception:
-                log.exception("Unexpected exception:")
+    except asyncio.CancelledError:
+        pass
 
     log.info("Finish ratecrawler task")
 
 
-async def make_request(session: ClientSession, url: str) -> bytes:
-    log.debug("New request to %s", RATES_URL)
-    async with session.get(RATES_URL) as resp:
-        resp.raise_for_status()
-        return await resp.read()
-
-
-def parse_raw(raw: bytes, ts: int, assets: list[Asset]) -> list[Point]:
+def parse_raw(raw: bytes, ts: int, assets: list[Asset]) -> list[HistoryPoint]:
     """Parse raw response bytes to Points list and return it."""
-    # TODO: add errors handling
+    # TODO: add validation and errors handling
 
     raw_json = raw.strip().removeprefix(b"null(").removesuffix(b");")
     data: dict[str, list[dict[str, Any]]] = json.loads(raw_json)
     rates = data.get("Rates", [])
 
-    result: list[Point] = []
+    result: list[HistoryPoint] = []
 
     symbol_to_asset = {i.name: i for i in assets}
 
@@ -72,11 +73,12 @@ def parse_raw(raw: bytes, ts: int, assets: list[Asset]) -> list[Point]:
         symbol = rate.get("Symbol")
 
         if symbol in symbol_to_asset:
-            bid: float = rate.get("Bid") or 0.0
-            ask: float = rate.get("Ask") or 0.0
+            # TODO: check Bid and Ask valies before converting to Decimal
+            bid = Decimal(str(rate.get("Bid") or 0.0))
+            ask = Decimal(str(rate.get("Ask") or 0.0))
             value = (bid + ask) / 2
 
-            point = Point(
+            point = HistoryPoint(
                 asset=symbol_to_asset[symbol],
                 timestamp=ts,
                 value=value,
@@ -85,3 +87,9 @@ def parse_raw(raw: bytes, ts: int, assets: list[Asset]) -> list[Point]:
             result.append(point)
 
     return result
+
+
+async def _make_request(session: ClientSession, url: str) -> bytes:
+    async with session.get(url) as resp:
+        resp.raise_for_status()
+        return await resp.read()

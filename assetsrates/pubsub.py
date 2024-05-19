@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Any, Self
 
 
 if TYPE_CHECKING:
-    from .storage import Point
+    from .storage import HistoryPoint
 
 
-def publish(channel: str, msg: Point) -> None:
+def publish(channel: str, msg: HistoryPoint) -> None:
     _get_channel(channel).publish(msg)
 
 
@@ -20,7 +20,7 @@ class Subscription(AbstractContextManager["Subscription"]):
     )
 
     _channel: _Channel
-    _queue: asyncio.Queue[Point]
+    _queue: asyncio.Queue[HistoryPoint]
 
     def __init__(self, channel: str) -> None:
         # TODO: Ask about queue maxsize for subscribers
@@ -34,12 +34,12 @@ class Subscription(AbstractContextManager["Subscription"]):
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self._channel.unsubscribe(self)
 
-    def put(self, msg: Point) -> None:
+    def put(self, msg: HistoryPoint) -> None:
         # TODO: Ask what to do if queue is full
         if not self._queue.full():
             self._queue.put_nowait(msg)
 
-    async def get(self) -> Point:
+    async def get(self) -> HistoryPoint:
         return await self._queue.get()
 
 
@@ -65,7 +65,7 @@ class _Channel:
     def unsubscribe(self, subscriber: Subscription) -> None:
         self._subscribers.remove(subscriber)
 
-    def publish(self, msg: Point) -> None:
+    def publish(self, msg: HistoryPoint) -> None:
         for subscriber in self._subscribers:
             subscriber.put(msg)
 

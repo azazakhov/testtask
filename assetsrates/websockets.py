@@ -11,7 +11,7 @@ from . import json
 from .pubsub import Subscription
 from .storage import (
     Asset,
-    Point,
+    HistoryPoint,
     get_asset_by_id,
     get_asset_history,
     get_available_assets,
@@ -34,17 +34,24 @@ async def ws_handler(request: Request) -> WebSocketResponse:
 
     subscribe_task: asyncio.Task[None] | None = None
 
-    async for action, msg in aiter_ws_messages(ws):
-        # TODO: add exceptions handler
-        if action == ACTION_ASSETS:
-            await assets_handler(ws)
+    try:
+        async for action, msg in aiter_ws_messages(ws):
+            # TODO: add exceptions handler
+            if action == ACTION_ASSETS:
+                await assets_handler(ws)
 
-        elif action == ACTION_SUBSCRIBE:
-            if subscribe_task is not None:
-                await cancel_task(subscribe_task)
-                subscribe_task = None
+            elif action == ACTION_SUBSCRIBE:
+                if subscribe_task is not None:
+                    await cancel_task(subscribe_task)
+                    subscribe_task = None
 
-            subscribe_task = asyncio.create_task(subscribe_handler(ws, msg))
+                subscribe_task = asyncio.create_task(
+                    subscribe_handler(ws, msg),
+                )
+
+    finally:
+        if subscribe_task is not None:
+            await cancel_task(subscribe_task)
 
     log.debug("Websocket connection closed")
 
@@ -148,7 +155,7 @@ def build_assets_message(assets: list[Asset]) -> dict[str, Any]:
     }
 
 
-def build_asset_history_message(points: list[Point]) -> dict[str, Any]:
+def build_asset_history_message(points: list[HistoryPoint]) -> dict[str, Any]:
     """Return outcome message in first response to "subscribe" action."""
     return {
         "action": "asset_history",
@@ -158,7 +165,7 @@ def build_asset_history_message(points: list[Point]) -> dict[str, Any]:
     }
 
 
-def build_point_message(point: Point) -> dict[str, Any]:
+def build_point_message(point: HistoryPoint) -> dict[str, Any]:
     """Return outcome message with notification about asset update."""
     return {
         "action": "point",
@@ -166,10 +173,10 @@ def build_point_message(point: Point) -> dict[str, Any]:
     }
 
 
-def serialize_point(point: Point) -> dict[str, Any]:
+def serialize_point(point: HistoryPoint) -> dict[str, Any]:
     return {
         "assetId": point.asset.id,
         "assetName": point.asset.name,
         "time": point.timestamp,
-        "value": point.value,
+        "value": float(point.value),
     }
