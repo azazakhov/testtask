@@ -2,6 +2,8 @@ import logging
 from collections import defaultdict, deque
 from typing import Final, NamedTuple
 
+from .pubsub import publish
+
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -54,6 +56,7 @@ async def save_points(points: list[Point]) -> None:
     for point in points:
         log.debug("New point for %s asset", point.asset.name)
         _STORAGE[point.asset].appendleft(point)
+        publish(point.asset.name, point)
 
 
 async def get_asset_history(asset: Asset) -> list[Point]:

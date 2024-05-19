@@ -1,5 +1,6 @@
 """Websocket handler."""
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any, Final
@@ -7,6 +8,7 @@ from typing import Any, Final
 from aiohttp.web import Request, WebSocketResponse
 
 from . import json
+from .pubsub import Subscription
 from .storage import (
     Asset,
     Point,
@@ -30,13 +32,19 @@ async def ws_handler(request: Request) -> WebSocketResponse:
 
     log.debug("New websocket connection")
 
+    subscribe_task: asyncio.Task[None] | None = None
+
     async for action, msg in aiter_ws_messages(ws):
         # TODO: add exceptions handler
         if action == ACTION_ASSETS:
             await assets_handler(ws)
 
         elif action == ACTION_SUBSCRIBE:
-            await subscribe_handler(ws, msg)
+            if subscribe_task is not None:
+                await cancel_task(subscribe_task)
+                subscribe_task = None
+
+            subscribe_task = asyncio.create_task(subscribe_handler(ws, msg))
 
     log.debug("Websocket connection closed")
 
@@ -87,8 +95,17 @@ async def send_ws_message(ws: WebSocketResponse, msg: dict[str, Any]) -> None:
     await ws.send_json(msg, dumps=json.dumps)
 
 
+async def cancel_task(task: asyncio.Task[Any]) -> None:
+    task.cancel()
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 async def assets_handler(ws: WebSocketResponse) -> None:
-    """Handle for "assets" action."""
+    """Handle "assets" action."""
     log.debug("Send available assets")
     assets = await get_available_assets()
     resp_message = build_assets_message(assets)
@@ -99,7 +116,7 @@ async def subscribe_handler(
     ws: WebSocketResponse,
     msg: dict[str, Any],
 ) -> None:
-    """Handle for "subscribe" action."""
+    """Handle "subscribe" action."""
     asset: Asset | None
     asset_id = msg.get("assetId")
 
@@ -115,7 +132,10 @@ async def subscribe_handler(
     resp_message = build_asset_history_message(history_points)
     await send_ws_message(ws, resp_message)
 
-    # TODO: add subscription for new points
+    with Subscription(asset.name) as sub:
+        while True:
+            point = await sub.get()
+            await send_ws_message(ws, build_point_message(point))
 
 
 def build_assets_message(assets: list[Asset]) -> dict[str, Any]:
@@ -139,15 +159,10 @@ def build_asset_history_message(points: list[Point]) -> dict[str, Any]:
 
 
 def build_point_message(point: Point) -> dict[str, Any]:
-    """Return outcome message with notifications about asset update."""
+    """Return outcome message with notification about asset update."""
     return {
         "action": "point",
-        "message": {
-            "assetId": 1,
-            "assetName": "EURUSD",
-            "time": 1453556718,
-            "value": 1.079755,
-        },
+        "message": serialize_point(point),
     }
 
 
