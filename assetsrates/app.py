@@ -23,6 +23,7 @@ def create_app(argv: list[str] | None = None) -> Application:
 async def ratescrawler_task(app: Application) -> AsyncGenerator[None, None]:
     """Application startup/cleanup handler for running ratescrawler task."""
     app["ratescrawler_task"] = asyncio.create_task(ratescrawler.crawl())
+
     yield
 
     app["ratescrawler_task"].cancel()

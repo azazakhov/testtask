@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict
 from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any, Self
 
@@ -10,7 +11,8 @@ if TYPE_CHECKING:
 
 
 def publish(channel: str, msg: HistoryPoint) -> None:
-    _get_channel(channel).publish(msg)
+    """Publish message in specific channel."""
+    _CHANNELS[channel].publish(msg)
 
 
 class Subscription(AbstractContextManager["Subscription"]):
@@ -25,7 +27,7 @@ class Subscription(AbstractContextManager["Subscription"]):
     def __init__(self, channel: str) -> None:
         # TODO: Ask about queue maxsize for subscribers
         self._queue = asyncio.Queue(maxsize=100)
-        self._channel = _get_channel(channel)
+        self._channel = _CHANNELS[channel]
 
     def __enter__(self) -> Self:
         self._channel.subscribe(self)
@@ -34,29 +36,21 @@ class Subscription(AbstractContextManager["Subscription"]):
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self._channel.unsubscribe(self)
 
-    def put(self, msg: HistoryPoint) -> None:
+    async def get(self) -> HistoryPoint:
+        return await self._queue.get()
+
+    def _put(self, msg: HistoryPoint) -> None:
         # TODO: Ask what to do if queue is full
         if not self._queue.full():
             self._queue.put_nowait(msg)
 
-    async def get(self) -> HistoryPoint:
-        return await self._queue.get()
-
-
-_CHANNELS: dict[str, _Channel] = {}
-
 
 class _Channel:
-    __slots__ = (
-        "_name",
-        "_subscribers",
-    )
+    __slots__ = ("_subscribers",)
 
-    _name: str
     _subscribers: set[Subscription]
 
-    def __init__(self, name: str) -> None:
-        self._name = name
+    def __init__(self) -> None:
         self._subscribers = set()
 
     def subscribe(self, subscriber: Subscription) -> None:
@@ -67,11 +61,7 @@ class _Channel:
 
     def publish(self, msg: HistoryPoint) -> None:
         for subscriber in self._subscribers:
-            subscriber.put(msg)
+            subscriber._put(msg)
 
 
-def _get_channel(name: str) -> _Channel:
-    if name not in _CHANNELS:
-        _CHANNELS[name] = _Channel(name)
-
-    return _CHANNELS[name]
+_CHANNELS: dict[str, _Channel] = defaultdict(_Channel)

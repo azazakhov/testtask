@@ -98,7 +98,7 @@ async def test_assetsrates(patch_rates_request, cli):
         resp = json.loads(await ws.receive_str())
         assert resp == ASSETS_RESPONSE
 
-        # No additioanl messages
+        # No additional messages
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(ws.receive_str(), 0.01)
 
@@ -122,7 +122,7 @@ async def test_assetsrates(patch_rates_request, cli):
         # Wait for update
         resp = json.loads(await asyncio.wait_for(ws.receive_str(), 1.1))
 
-        # No additioanl messages
+        # No additional messages
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(ws.receive_str(), 0.01)
 
@@ -133,7 +133,7 @@ async def test_assetsrates(patch_rates_request, cli):
         assert history[0].timestamp
         assert history[0].value == Decimal("0.3")
 
-        # check notification message
+        # Сheck notification message
         assert resp == {
             "action": "point",
             "message": {
@@ -149,7 +149,7 @@ async def test_assetsrates(patch_rates_request, cli):
         resp = json.loads(await ws.receive_str())
         assert resp == ASSETS_RESPONSE
 
-        # No additioanl messages
+        # No additional messages
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(ws.receive_str(), 0.01)
 
@@ -169,7 +169,7 @@ async def test_assetsrates(patch_rates_request, cli):
         assert history[0].timestamp
         assert history[0].value == Decimal("0.45")
 
-        # check notification message
+        # Сheck notification message
         assert resp == {
             "action": "point",
             "message": {
@@ -210,7 +210,7 @@ async def test_assetsrates(patch_rates_request, cli):
             },
         }
 
-        # No additioanl messages
+        # No additional messages
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(ws.receive_str(), 0.01)
 
@@ -227,7 +227,7 @@ async def test_assetsrates(patch_rates_request, cli):
         history = await storage.get_asset_history(storage.Asset(2, "USDJPY"))
         assert len(history) == 3
 
-        # check notification message
+        # Check notification message
         assert resp == {
             "action": "point",
             "message": {
@@ -238,6 +238,6 @@ async def test_assetsrates(patch_rates_request, cli):
             },
         }
 
-        # No additioanl messages
+        # No additional messages
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(ws.receive_str(), 0.01)
