@@ -42,7 +42,7 @@ async def ws_handler(request: Request) -> WebSocketResponse:
 
             elif action == ACTION_SUBSCRIBE:
                 if subscribe_task is not None:
-                    await cancel_task(subscribe_task)
+                    await _cancel_task(subscribe_task)
                     subscribe_task = None
 
                 subscribe_task = asyncio.create_task(
@@ -51,7 +51,8 @@ async def ws_handler(request: Request) -> WebSocketResponse:
 
     finally:
         if subscribe_task is not None:
-            await cancel_task(subscribe_task)
+            log.debug("Cancel subscribtion task")
+            await _cancel_task(subscribe_task)
 
     log.debug("Websocket connection closed")
 
@@ -102,15 +103,6 @@ async def send_ws_message(ws: WebSocketResponse, msg: dict[str, Any]) -> None:
     await ws.send_json(msg, dumps=json.dumps)
 
 
-async def cancel_task(task: asyncio.Task[Any]) -> None:
-    task.cancel()
-
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
-
-
 async def assets_handler(ws: WebSocketResponse) -> None:
     """Handle "assets" action."""
     log.debug("Send available assets")
@@ -134,12 +126,13 @@ async def subscribe_handler(
         # TODO: ask what to do if asset not found (and asset_id is invalid)
         return
 
-    log.debug("Send history for %s", asset.name)
+    log.debug("Send history for %s", asset.symbol)
     history_points = await get_asset_history(asset)
     resp_message = build_asset_history_message(history_points)
     await send_ws_message(ws, resp_message)
 
-    with Subscription(asset.name) as sub:
+    log.debug("Subscribe for %s updates", asset.symbol)
+    with Subscription(asset.symbol) as sub:
         while True:
             point = await sub.get()
             await send_ws_message(ws, build_point_message(point))
@@ -150,7 +143,7 @@ def build_assets_message(assets: list[Asset]) -> dict[str, Any]:
     return {
         "action": "assets",
         "message": {
-            "assets": [i._asdict() for i in assets],
+            "assets": [serialize_asset(i) for i in assets],
         },
     }
 
@@ -173,10 +166,27 @@ def build_point_message(point: HistoryPoint) -> dict[str, Any]:
     }
 
 
+def serialize_asset(asset: Asset) -> dict[str, Any]:
+    return {
+        "id": asset.id,
+        "name": asset.symbol,
+    }
+
+
 def serialize_point(point: HistoryPoint) -> dict[str, Any]:
     return {
         "assetId": point.asset.id,
-        "assetName": point.asset.name,
+        "assetName": point.asset.symbol,
         "time": point.timestamp,
         "value": float(point.value),
     }
+
+
+async def _cancel_task(task: asyncio.Task[Any]) -> None:
+    # TODO: check if task is running
+    task.cancel()
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass

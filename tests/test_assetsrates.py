@@ -1,13 +1,14 @@
 import asyncio
 import json
+from collections import defaultdict, deque
 from decimal import Decimal
 from itertools import chain, repeat
 from unittest.mock import patch
 
 import pytest
 
-from assetsrates import storage
-from assetsrates.app import create_app
+from assetsrates import app, pubsub
+from assetsrates.storage import Asset
 
 
 @pytest.fixture
@@ -19,12 +20,14 @@ def patch_rates_request():
 
 @pytest.fixture
 def cli(patch_rates_request, event_loop, aiohttp_client):
-    app = create_app()
-    cli = event_loop.run_until_complete(aiohttp_client(app))
+    # TODO: add tests for app startup/cleanup
+    with patch.object(app.storage, "create_pool"):
+        aiohttp_app = app.create_app()
+        cli = event_loop.run_until_complete(aiohttp_client(aiohttp_app))
 
-    yield cli
+        yield cli
 
-    event_loop.run_until_complete(cli.close())
+        event_loop.run_until_complete(cli.close())
 
 
 ASSETS_RESPONSE = {
@@ -86,7 +89,49 @@ RATES_UPDATE_3 = {
 }
 
 
+FAKE_STORAGE = defaultdict(deque)
+# create default assets
+FAKE_STORAGE[Asset(1, "EURUSD")]
+FAKE_STORAGE[Asset(2, "USDJPY")]
+FAKE_STORAGE[Asset(3, "GBPUSD")]
+FAKE_STORAGE[Asset(4, "AUDUSD")]
+FAKE_STORAGE[Asset(5, "USDCAD")]
+
+
+async def fake_get_available_assets():
+    return list(FAKE_STORAGE.keys())
+
+
+async def fake_get_asset_by_id(id):
+    for asset in await fake_get_available_assets():
+        if asset.id == id:
+            return asset
+
+    return None
+
+
+async def fake_save_points(points):
+    for point in points:
+        FAKE_STORAGE[point.asset].appendleft(point)
+        pubsub.publish(point.asset.symbol, point)
+
+
+async def fake_get_asset_history(asset):
+    return list(FAKE_STORAGE[asset])
+
+
 @pytest.mark.asyncio
+@patch.multiple(
+    "assetsrates.ratescrawler",
+    get_available_assets=fake_get_available_assets,
+    save_points=fake_save_points,
+)
+@patch.multiple(
+    "assetsrates.websockets",
+    get_asset_by_id=fake_get_asset_by_id,
+    get_asset_history=fake_get_asset_history,
+    get_available_assets=fake_get_available_assets,
+)
 async def test_assetsrates(patch_rates_request, cli):
     async with cli.ws_connect("/") as ws:
         # No initial messages
@@ -110,7 +155,7 @@ async def test_assetsrates(patch_rates_request, cli):
         assert resp == {"action": "asset_history", "message": {"points": []}}
 
         # Current history is empty for asset_id=1
-        history = await storage.get_asset_history(storage.Asset(1, "EURUSD"))
+        history = await fake_get_asset_history(Asset(1, "EURUSD"))
         assert len(history) == 0
 
         # Patch response from rates external source - send first update
@@ -127,9 +172,9 @@ async def test_assetsrates(patch_rates_request, cli):
             await asyncio.wait_for(ws.receive_str(), 0.01)
 
         # Now history has one entry
-        history = await storage.get_asset_history(storage.Asset(1, "EURUSD"))
+        history = await fake_get_asset_history(Asset(1, "EURUSD"))
         assert len(history) == 1
-        assert history[0].asset == storage.Asset(1, "EURUSD")
+        assert history[0].asset == Asset(1, "EURUSD")
         assert history[0].timestamp
         assert history[0].value == Decimal("0.3")
 
@@ -163,9 +208,9 @@ async def test_assetsrates(patch_rates_request, cli):
         resp = json.loads(await asyncio.wait_for(ws.receive_str(), 1.1))
 
         # Two entry in history data
-        history = await storage.get_asset_history(storage.Asset(1, "EURUSD"))
+        history = await fake_get_asset_history(Asset(1, "EURUSD"))
         assert len(history) == 2
-        assert history[0].asset == storage.Asset(1, "EURUSD")
+        assert history[0].asset == Asset(1, "EURUSD")
         assert history[0].timestamp
         assert history[0].value == Decimal("0.45")
 
@@ -181,7 +226,7 @@ async def test_assetsrates(patch_rates_request, cli):
         }
 
         # Two entry in history data for asset_id=2
-        history = await storage.get_asset_history(storage.Asset(2, "USDJPY"))
+        history = await fake_get_asset_history(Asset(2, "USDJPY"))
         assert len(history) == 2
 
         # Subscribe to another asset
@@ -224,7 +269,7 @@ async def test_assetsrates(patch_rates_request, cli):
         resp = json.loads(await asyncio.wait_for(ws.receive_str(), 1.1))
 
         # Three entry in history data for asset_id=2
-        history = await storage.get_asset_history(storage.Asset(2, "USDJPY"))
+        history = await fake_get_asset_history(Asset(2, "USDJPY"))
         assert len(history) == 3
 
         # Check notification message

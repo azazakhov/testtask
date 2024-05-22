@@ -67,7 +67,7 @@ def parse_raw(raw: bytes, ts: int, assets: list[Asset]) -> list[HistoryPoint]:
 
     result: list[HistoryPoint] = []
 
-    symbol_to_asset = {i.name: i for i in assets}
+    symbol_to_asset = {i.symbol: i for i in assets}
 
     for rate in rates:
         symbol = rate.get("Symbol")

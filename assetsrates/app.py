@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 from aiohttp.web import Application
 from aiohttp.web import get as route_get
 
-from . import ratescrawler, websockets
+from . import ratescrawler, storage, websockets
 
 
 def create_app(argv: list[str] | None = None) -> Application:
@@ -15,9 +15,17 @@ def create_app(argv: list[str] | None = None) -> Application:
     """
 
     app = Application()
+    app.cleanup_ctx.append(init_db)
     app.cleanup_ctx.append(ratescrawler_task)
     app.add_routes([route_get("/", websockets.ws_handler)])
     return app
+
+
+async def init_db(app: Application) -> AsyncGenerator[None, None]:
+    """Application startup/cleanup handler for DB connection initialization."""
+    async with storage.create_pool() as db_pool:
+        app["db_pool"] = db_pool
+        yield
 
 
 async def ratescrawler_task(app: Application) -> AsyncGenerator[None, None]:

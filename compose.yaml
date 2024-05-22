@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16.3
+
+    volumes:
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+
+    env_file: .env
+
+  app:
+    image: assetsrates:latest
+
+    build:
+      tags:
+        - assetsrates:latest
+
+    depends_on:
+      - postgres
+
+    env_file: .env
+
+    ports:
+      - 127.0.0.1:8080:8080

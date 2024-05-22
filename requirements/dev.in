@@ -1,5 +1,6 @@
 -c main.txt
 
+asyncpg-stubs
 mypy
 pytest
 pytest-aiohttp
