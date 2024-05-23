@@ -22,10 +22,10 @@ REQUEST_PERIOD: Final[int] = 1
 
 async def crawl() -> None:
     if not RATES_URL:
-        log.error("RATES_URL env var is not set, ratecrawler is not started")
+        log.error("RATES_URL env var is not set, ratescrawler is not started")
         return
 
-    log.info("Start ratecrawler task")
+    log.info("Start ratescrawler task")
 
     try:
         async with ClientSession() as session:
@@ -54,7 +54,7 @@ async def crawl() -> None:
     except asyncio.CancelledError:
         pass
 
-    log.info("Finish ratecrawler task")
+    log.info("Finish ratescrawler task")
 
 
 def parse_raw(raw: bytes, ts: int, assets: list[Asset]) -> list[HistoryPoint]:

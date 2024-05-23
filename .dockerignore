@@ -16,6 +16,7 @@ build/
 
 # environments
 *.env
+.env.example
 
 # local reqires
 requirements-local.txt
@@ -32,6 +33,9 @@ tests/
 # Docker
 Dockerfile
 .dockerignore
+compose.yaml
 
 # make
 Makefile
+
+init_db.sql

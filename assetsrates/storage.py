@@ -8,13 +8,19 @@ import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from decimal import Decimal
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple, TypeAlias
 
 from asyncpg import Pool, Record
 from asyncpg import create_pool as _create_pool
 from asyncpg.pool import PoolConnectionProxy
 
 from .pubsub import publish
+
+
+if TYPE_CHECKING:
+    # ignore UP040:
+    # Type alias uses `TypeAlias` annotation instead of the `type` keyword
+    Connection: TypeAlias = PoolConnectionProxy[Record]  # noqa: UP040
 
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -44,6 +50,9 @@ _connection_pool: Pool[Record] | None = None
 async def create_pool() -> AsyncGenerator[Pool[Record], None]:
     global _connection_pool
 
+    # TODO: hide credetials from logs
+    log.debug("Connect to database: %s", PG_URL)
+
     try:
         try:
             _connection_pool = await _create_pool(PG_URL)
@@ -52,20 +61,19 @@ async def create_pool() -> AsyncGenerator[Pool[Record], None]:
             log.error("Could not connect to %s: %s", PG_URL, e)
             raise
 
-        # ignore: Incompatible types in "yield"
-        yield _connection_pool  # type: ignore[misc]
+        assert _connection_pool, "DB connection pool is not inited"
+        yield _connection_pool
 
     finally:
         if _connection_pool is not None:
             await _connection_pool.close()
 
         _connection_pool = None
+        log.debug("Connections to database are closed")
 
 
 @asynccontextmanager
-async def acquire_connection() -> (
-    AsyncGenerator[PoolConnectionProxy[Record], None]
-):
+async def acquire_connection() -> AsyncGenerator[Connection, None]:
     assert _connection_pool, "DB connection pool is not inited"
 
     async with _connection_pool.acquire() as conn:
@@ -93,10 +101,15 @@ async def get_asset_by_id(id: int) -> Asset | None:
 
 
 async def save_points(points: list[HistoryPoint]) -> None:
+    sql = """
+        INSERT INTO history_points (asset_id, timestamp, value)
+        VALUES ($1, to_timestamp($2), $3);
+    """
+
     async with acquire_connection() as conn:
         for point in points:
             await conn.execute(
-                "INSERT INTO history_points (asset_id, timestamp, value) VALUES ($1, to_timestamp($2), $3);",
+                sql,
                 point.asset.id,
                 point.timestamp,
                 point.value,
@@ -109,9 +122,15 @@ async def save_points(points: list[HistoryPoint]) -> None:
 async def get_asset_history(asset: Asset) -> list[HistoryPoint]:
     from_ts = time.time() - HISTORY_RANGE
 
+    sql = """
+        SELECT date_part('epoch', timestamp)::integer as timestamp, value
+        FROM history_points
+        WHERE asset_id=$1 AND timestamp>=to_timestamp($2);
+    """
+
     async with acquire_connection() as conn:
         records = await conn.fetch(
-            "SELECT timestamp, value FROM history_points WHERE asset_id=$1 AND timestamp>=to_timestamp($2);",
+            sql,
             asset.id,
             from_ts,
         )
