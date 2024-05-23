@@ -3,7 +3,7 @@ import json
 from collections import defaultdict, deque
 from decimal import Decimal
 from itertools import chain, repeat
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -113,7 +113,7 @@ async def fake_get_asset_by_id(id):
 async def fake_save_points(points):
     for point in points:
         FAKE_STORAGE[point.asset].appendleft(point)
-        pubsub.publish(point.asset.symbol, point)
+        pubsub.channels.publish(point.asset.symbol, point)
 
 
 async def fake_get_asset_history(asset):
@@ -132,7 +132,14 @@ async def fake_get_asset_history(asset):
     get_asset_history=fake_get_asset_history,
     get_available_assets=fake_get_available_assets,
 )
-async def test_assetsrates(patch_rates_request, cli):
+@patch("assetsrates.pubsub.subscription_manager")
+async def test_assetsrates(
+    subscription_manager_mock,
+    patch_rates_request,
+    cli,
+):
+    subscription_manager_mock.subscribe.return_value = AsyncMock()
+
     async with cli.ws_connect("/") as ws:
         # No initial messages
         with pytest.raises(asyncio.TimeoutError):

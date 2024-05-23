@@ -1,67 +1,57 @@
 from __future__ import annotations
 
-import asyncio
+from asyncio import Queue
 from collections import defaultdict
-from contextlib import AbstractContextManager
-from typing import TYPE_CHECKING, Any, Self
+from collections.abc import AsyncGenerator
+from contextlib import (
+    asynccontextmanager,
+)
+from typing import Final
+
+from .storage import HistoryPoint, subscription_manager
 
 
-if TYPE_CHECKING:
-    from .storage import HistoryPoint
+# TODO: Ask about queue maxsize for subscribers
+SUBSCRIBER_QUEUE_MAXSIZE = 100
 
 
-def publish(channel: str, msg: HistoryPoint) -> None:
-    """Publish message in specific channel."""
-    _CHANNELS[channel].publish(msg)
+class ChannelsManager:
+    __slots__ = ("_subscriptions",)
 
-
-class Subscription(AbstractContextManager["Subscription"]):
-    __slots__ = (
-        "_channel",
-        "_queue",
-    )
-
-    _channel: _Channel
-    _queue: asyncio.Queue[HistoryPoint]
-
-    def __init__(self, channel: str) -> None:
-        # TODO: Ask about queue maxsize for subscribers
-        self._queue = asyncio.Queue(maxsize=100)
-        self._channel = _CHANNELS[channel]
-
-    def __enter__(self) -> Self:
-        self._channel.subscribe(self)
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self._channel.unsubscribe(self)
-
-    async def get(self) -> HistoryPoint:
-        return await self._queue.get()
-
-    def _put(self, msg: HistoryPoint) -> None:
-        # TODO: Ask what to do if queue is full
-        if not self._queue.full():
-            self._queue.put_nowait(msg)
-
-
-class _Channel:
-    __slots__ = ("_subscribers",)
-
-    _subscribers: set[Subscription]
+    _subscriptions: dict[str, set[Queue[HistoryPoint]]]
 
     def __init__(self) -> None:
-        self._subscribers = set()
+        self._subscriptions = defaultdict(set)
 
-    def subscribe(self, subscriber: Subscription) -> None:
-        self._subscribers.add(subscriber)
+    @asynccontextmanager
+    async def subscribe(
+        self,
+        channel: str,
+    ) -> AsyncGenerator[Queue[HistoryPoint], None]:
+        subscription: Queue[HistoryPoint] = Queue(
+            maxsize=SUBSCRIBER_QUEUE_MAXSIZE,
+        )
 
-    def unsubscribe(self, subscriber: Subscription) -> None:
-        self._subscribers.remove(subscriber)
+        self._subscriptions[channel].add(subscription)
 
-    def publish(self, msg: HistoryPoint) -> None:
-        for subscriber in self._subscribers:
-            subscriber._put(msg)
+        try:
+            async with subscription_manager.subscribe(
+                channel,
+                self.publish,
+            ):
+                yield subscription
+
+        finally:
+            self._subscriptions[channel].remove(subscription)
+
+            if not self._subscriptions[channel]:
+                del self._subscriptions[channel]
+
+    def publish(self, channel: str, point: HistoryPoint) -> None:
+        for subscription in self._subscriptions[channel]:
+            # TODO: Ask what to do if queue is full
+            if not subscription.full():
+                subscription.put_nowait(point)
 
 
-_CHANNELS: dict[str, _Channel] = defaultdict(_Channel)
+channels: Final[ChannelsManager] = ChannelsManager()

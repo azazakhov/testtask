@@ -5,16 +5,21 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Callable
+from contextlib import (
+    AbstractAsyncContextManager,
+    asynccontextmanager,
+    nullcontext,
+)
 from decimal import Decimal
+from functools import partial
 from typing import TYPE_CHECKING, Final, NamedTuple, TypeAlias
 
 from asyncpg import Pool, Record
 from asyncpg import create_pool as _create_pool
 from asyncpg.pool import PoolConnectionProxy
 
-from .pubsub import publish
+from . import json
 
 
 if TYPE_CHECKING:
@@ -115,7 +120,12 @@ async def save_points(points: list[HistoryPoint]) -> None:
                 point.value,
             )
 
-            publish(point.asset.symbol, point)
+            await conn.execute(
+                "SELECT pg_notify($1, $2);",
+                point.asset.symbol,
+                _dump_history_point(point),
+            )
+
             log.debug('New history point for "%s" asset', point.asset.symbol)
 
 
@@ -136,3 +146,94 @@ async def get_asset_history(asset: Asset) -> list[HistoryPoint]:
         )
 
     return [HistoryPoint(asset=asset, **i) for i in records]
+
+
+class SubscriptionManager:
+    __slots__ = (
+        "_channels",
+        "_connection",
+    )
+
+    _channels: set[str]
+    _connection: Connection | None
+
+    log = logging.getLogger(f"{__name__}.SubscriptionManager")
+
+    def __init__(self) -> None:
+        self._channels = set()
+        self._connection = None
+
+    @asynccontextmanager
+    async def subscribe(
+        self,
+        channel: str,
+        callback: Callable[[str, HistoryPoint], None],
+    ) -> AsyncGenerator[None, None]:
+        _callback = partial(self._subscribe_callback, callback=callback)
+        new_channel = channel not in self._channels
+
+        async with self._acquire() as conn:
+            try:
+                if new_channel:
+                    self.log.debug("Subscribe to channel: %s", channel)
+                    await conn.add_listener(channel, _callback)
+                    self._channels.add(channel)
+
+                yield
+
+            finally:
+                if new_channel:
+                    await conn.remove_listener(channel, _callback)
+                    self._channels.remove(channel)
+                    self.log.debug("Unubscribe from channel: %s", channel)
+
+    def _subscribe_callback(
+        self,
+        connection: Connection,
+        pid: int,
+        channel: str,
+        payload: str,
+        callback: Callable[[str, HistoryPoint], None],
+    ) -> None:
+        callback(channel, _load_history_point(payload))
+
+    @asynccontextmanager
+    async def _acquire(self) -> AsyncGenerator[Connection, None]:
+        acquire_ctx: AbstractAsyncContextManager[Connection]
+        reset_conn = False
+
+        if self._connection is None:
+            acquire_ctx = acquire_connection()
+            reset_conn = True
+            self.log.debug("Acquire connection")
+
+        else:
+            acquire_ctx = nullcontext(self._connection)
+
+        try:
+            async with acquire_ctx as self._connection:
+                yield self._connection
+
+        finally:
+            if reset_conn:
+                self._connection = None
+                self.log.debug("Release connection")
+
+
+subscription_manager: Final[SubscriptionManager] = SubscriptionManager()
+
+
+def _dump_history_point(point: HistoryPoint) -> str:
+    return json.dumps(
+        (
+            point.asset.id,
+            point.asset.symbol,
+            point.timestamp,
+            str(point.value),
+        ),
+    )
+
+
+def _load_history_point(payload: str) -> HistoryPoint:
+    id, symbol, timestamp, value = json.loads(payload)
+    return HistoryPoint(Asset(id, symbol), timestamp, Decimal(value))

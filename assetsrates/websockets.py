@@ -8,7 +8,7 @@ from typing import Any, Final
 from aiohttp.web import Request, WebSocketResponse
 
 from . import json
-from .pubsub import Subscription
+from .pubsub import channels
 from .storage import (
     Asset,
     HistoryPoint,
@@ -132,7 +132,7 @@ async def subscribe_handler(
     await send_ws_message(ws, resp_message)
 
     log.debug("Subscribe for %s updates", asset.symbol)
-    with Subscription(asset.symbol) as sub:
+    async with channels.subscribe(asset.symbol) as sub:
         while True:
             point = await sub.get()
             await send_ws_message(ws, build_point_message(point))
